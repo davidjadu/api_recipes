@@ -4,6 +4,7 @@ Test for models.
 from django.test import TestCase
 from django.contrib.auth import get_user_model
 
+
 class ModelTests(TestCase):
     """Test models."""
 
@@ -16,5 +17,6 @@ class ModelTests(TestCase):
             password=password,
         )
 
-        self.assertEqual(user.email,email)
-        self.assertEqual(user.check_password(password),True) #We want to have a hashed password
+        self.assertEqual(user.email, email)
+        # The password is hashed
+        self.assertEqual(user.check_password(password), True)
