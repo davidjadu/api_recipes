@@ -2,7 +2,11 @@
 Tests for the recipe API.
 """
 
+import os
+import tempfile
+
 from decimal import Decimal
+from PIL import Image
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -23,6 +27,11 @@ RECIPES_URL = reverse('recipe:recipe-list')
 def detail_url(recipe_id):
     """Create and return a recipe detail URL."""
     return reverse('recipe:recipe-detail', args=[recipe_id])
+
+
+def image_upload_url(recipe_id):
+    """Create and return a recipe image upload URL."""
+    return reverse('recipe:recipe-upload-image', args=[recipe_id])
 
 
 def create_recipe(user, **params):
@@ -412,3 +421,92 @@ class PrivateRecipeApiTests(TestCase):
         self.assertEqual(res.status_code, status.HTTP_200_OK)
         recipe.refresh_from_db()
         self.assertEqual(recipe.ingredients.count(), 0)
+
+    def test_filter_by_tags(self):
+        """Test filtering recipes by tags."""
+        recipe1 = create_recipe(user=self.user, title='Recipe 1')
+        recipe2 = create_recipe(user=self.user, title='Recipe 2')
+        tag1 = Tag.objects.create(user=self.user, name='Tag1')
+        tag2 = Tag.objects.create(user=self.user, name='Tag2')
+        recipe1.tags.add(tag1)
+        recipe2.tags.add(tag2)
+
+        res = self.client.get(RECIPES_URL, {'tags': f'{tag1.id}'})
+
+        serializer1 = RecipeSerializer(recipe1)
+        serializer2 = RecipeSerializer(recipe2)
+
+        self.assertIn(serializer1.data, res.data)
+        self.assertNotIn(serializer2.data, res.data)
+
+    def test_filter_by_ingredients(self):
+        """Test filtering recipes by ingredients."""
+        recipe1 = create_recipe(user=self.user, title='Recipe 1')
+        recipe2 = create_recipe(user=self.user, title='Recipe 2')
+        ingredient1 = Ingredient.objects.create(
+            user=self.user,
+            name='Ingredient1'
+        )
+        ingredient2 = Ingredient.objects.create(
+            user=self.user,
+            name='Ingredient2'
+        )
+        recipe1.ingredients.add(ingredient1)
+        recipe2.ingredients.add(ingredient2)
+
+        res = self.client.get(
+            RECIPES_URL,
+            {'ingredients': f'{ingredient1.id}'}
+        )
+
+        serializer1 = RecipeSerializer(recipe1)
+        serializer2 = RecipeSerializer(recipe2)
+
+        self.assertIn(serializer1.data, res.data)
+        self.assertNotIn(serializer2.data, res.data)
+
+
+class ImageUploadTests(TestCase):
+    """Test image upload functionality for recipes."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = create_user(
+            email='test@example.com', password='testpass123'
+        )
+        self.client.force_authenticate(self.user)
+        self.recipe = create_recipe(user=self.user)
+
+    def tearDown(self):
+        return self.recipe.image.delete()
+
+    def test_upload_image_to_recipe(self):
+        """Test uploading an image to a recipe."""
+        url = image_upload_url(self.recipe.id)
+        with tempfile.NamedTemporaryFile(suffix='.jpg') as temp_file:
+            img = Image.new('RGB', (100, 100))
+            img.save(temp_file, format='JPEG')
+            temp_file.seek(0)
+            res = self.client.post(
+                url,
+                {'image': temp_file},
+                format='multipart'
+            )
+
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+
+        self.recipe.refresh_from_db()
+
+        self.assertIn('image', res.data)
+        self.assertTrue(os.path.exists(self.recipe.image.path))
+
+    def test_upload_image_bad_request(self):
+        """Test uploading an invalid image."""
+        url = image_upload_url(self.recipe.id)
+        res = self.client.post(
+            url,
+            {'image': 'not_an_image'},
+            format='multipart'
+        )
+
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
